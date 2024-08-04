@@ -1,0 +1,331 @@
+---
+title: "Projet : focus on the location Parameter"
+subtitle: |
+  | Modéliser une loi GEV
+#author : "LAST NAME First name"
+#date: "April 09, 2024"
+output: 
+  html_document:
+    theme: cosmo
+    highlight: zenburn
+    toc: true
+    number_sections: true
+    toc_float:
+      collapsed: false
+header-includes:
+  - \usepackage{bm}
+  - \newcommand{\E}{\mathbb{E}}
+  - \newcommand{\R}{\mathbb{R}}
+#bibliography: biblio.bib
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+library(ggplot2)
+library(tidyverse)
+library(readr)
+library(car)
+library(knitr)
+library(kableExtra)
+library(gridExtra)
+library(viridisLite)
+library(viridis)
+
+library(ismev)
+library(evd)
+library(boot)
+library(latex2exp)
+library(transport)
+
+library(extRemes)
+
+library(dplyr)
+library(SpatialExtremes)
+library(VGAM)
+library(mgcv)
+library(scoringRules)
+library(evgam)
+library(twosamples)
+
+library(gratia)
+```
+
+**Remarque**: Les variables référants aux ensembles de test et de validation sont intervertis dans le code. Cependant leur utilisation est bien en accord avec celle décrite dans le rapport.  
+
+
+
+```{r, telechargement_data}
+rm(list=objects())
+
+# Séparation des data
+setwd("~/Documents/ECCE/Private_Downscaling/0_Base/data")
+data <- read.csv('data2_12.csv')
+dataf <- read.csv('dataf2_12.csv')
+param <- read.csv('True_Parameters/gev2_param_true_present.csv')
+
+data <- na.omit(data)
+data_test <- data[data$Test == 1,]
+data_test <- data_test[ , !(names(data_test) %in% c("TOT_PR", "month", "year"))]
+data_test <- unique(data_test) 
+
+data_val <- data[data$Val == 1,]
+data_val <- data_val[ , !(names(data_val) %in% c("TOT_PR", "month", "year"))]
+data_val <- unique(data_val) 
+
+data_train <- data[data$Test ==0, ]
+data_train <- data_train[data_train$Val ==0, ]
+
+data_test <- merge(data_test, param, by = c("rlat", "rlon"), all.x = TRUE)
+```
+
+```{r}
+# ------------------------------------------
+# Modèles finale VGLM et VGAM 
+# --> Example pour un modèle VGLM et EVGAM
+# ------------------------------------------
+
+cm = list("(Intercept)" = diag(3), 
+          "loc1" = matrix(c(1, 0, 0, 0, 1, 0), nrow = 3),
+          "scale1" = matrix(c(0, 1, 0), nrow = 3),
+          "shape1" = matrix(c(1, 0, 0, 0, 1, 0), nrow = 3),
+          "alt" = matrix(c(1, 0, 0), nrow = 3),
+          'alt_mean20' = matrix(c(1, 0, 0), nrow = 3),
+          'loc2' = matrix(c(1, 0, 0), nrow = 3),
+          'scale2' = matrix(c(0, 1, 0), nrow = 3),
+          'shape2' = matrix(c(1, 0, 0), nrow = 3))
+
+Model_vglm <- vglm(TOT_PR ~ alt + loc1 + scale1 + shape1 + 
+                     alt_mean20 + loc2 + scale2 + shape2,
+                   constraints = cm,
+                   family = gev(zero = 3), 
+                   data = data_train,
+                   maxit = 100)
+
+m_gev <- evgam(list(TOT_PR~ s(alt_mean20) +s(loc2) + s(loc1) + s(alt) + s(shape1) + s(shape2), ~ s(scale1) + s(scale2) + s(loc1) + s(shape1), ~1), 
+               data = data_train, 
+               family = "gev")
+
+```
+
+```{r}
+
+# SPLINES VGAM present vs future
+
+liste_var <- seq(-3,3, 0.001)
+
+df <- data.frame(loc1 = liste_var, 
+                shape2 = rep(0, length(liste_var)), 
+                shape1 = rep(0, length(liste_var)), 
+                alt = rep(0, length(liste_var)), 
+                scale1 = rep(0, length(liste_var)),  
+                loc2 = rep(0, length(liste_var)), 
+                scale2 = rep(0, length(liste_var)),
+                alt_mean20 = rep(0, length(liste_var)))
+
+# Pour le premier modèle 
+param = 2
+smooth_1 <- m_gev[[param]]$smooth[[3]]
+Xu <- smooth_1$Xu
+first_para <- smooth_1$first.para
+last_para <- smooth_1$last.para
+spline_basis <- PredictMat(smooth_1, df)
+coef <- m_gev[[param]]$coefficients[first_para:last_para]
+spline_values <- spline_basis %*% coef
+vcov_matrix <- m_gev[[param]]$Vp[first_para:last_para, first_para:last_para]
+se_fit <- sqrt(rowSums((spline_basis %*% vcov_matrix) * spline_basis))
+ci_upper <- spline_values + 1.96 * se_fit
+ci_lower <- spline_values - 1.96 * se_fit
+
+spline_data <- data.frame(
+  alt = df$loc1,
+  spline_values = spline_values,
+  ci_upper = ci_upper,
+  ci_lower = ci_lower)
+
+
+# Pour le premier modèle 
+smooth_1 <- m_gevf[[param]]$smooth[[3]]
+Xu <- smooth_1$Xu
+first_para <- smooth_1$first.para
+last_para <- smooth_1$last.para
+spline_basis <- PredictMat(smooth_1, df)
+coef <- m_gevf[[param]]$coefficients[first_para:last_para]
+spline_values <- spline_basis %*% coef
+vcov_matrix <- m_gevf[[param]]$Vp[first_para:last_para, first_para:last_para]
+se_fit <- sqrt(rowSums((spline_basis %*% vcov_matrix) * spline_basis))
+ci_upper <- spline_values + 1.96 * se_fit
+ci_lower <- spline_values - 1.96 * se_fit
+  
+spline_data$spline_valuesf <- spline_values
+spline_data$ci_upperf <- ci_upper
+spline_data$ci_lowerf <- ci_lower
+
+
+```
+
+ggplot(spline_data) +
+     geom_line(aes(x = alt, y = spline_values), color = "rosybrown", size = 1) +
+     geom_ribbon(aes(x = alt, y = spline_values, ymin = ci_lower, ymax = ci_upper), alpha = 0.2, fill = "rosybrown") +
+     geom_line(aes(x = alt, y = spline_valuesf), color = "brown", size = 1) +
+     geom_ribbon(aes(x = alt, y = spline_valuesf, ymin = ci_lowerf, ymax = ci_upperf), alpha = 0.2, fill = "brown") +
+     labs(x = 'Loc1', y = "Location : s(loc1)") +
+     theme_minimal()+ 
+     ylim(c(-0.002, 0.002))
+     
+     
+     
+geom_line(aes(x = alt, y = alt_vglm), color = "gray", size = 1) +
+  geom_point(data = data_train, aes(x = shape1, y = rep(-0.2, length(loc2))), color = 'rosybrown', alpha = 0.1)+
+     labs(x = 'Shape1', y = "Logscale : s(shape1)") +
+     theme_minimal()+ 
+     ylim(c(-0.2, 0.2))
+     
+
+
+```{r}
+pred <- predict(m_gev, dataf)
+dataf$loc_pred <- pred[, 1]
+dataf$scale_pred <- exp(pred[, 2])
+dataf$shape_pred <- pred[, 3]
+
+# Alternative 
+pred <- predict(m_gev, dataf, type = 'response')
+dataf$loc_pred <- pred$location
+dataf$scale_pred <- pred$scale
+dataf$shape_pred <- pred$shape
+    
+write.csv(dataf, file = 'results.csv', row.names = FALSE)
+```
+
+
+
+```{r}
+# ------------------------------
+# Analyse without one variable
+# ------------------------------
+liste_col <- numeric(0)
+liste_aic <- numeric(0)
+
+liste_col <- c(liste_col, 'without elevation')
+m_gev <- evgam(list(TOT_PR ~ s(loc2)  + s(alt) + s(shape1) +s(loc1) , ~ s(scale1)  +s(loc1) +s(scale2) +s(alt_mean20), ~1), data = data_train, family = "gev") 
+liste_aic <- c(liste_aic, AIC(m_gev))
+
+liste_col <- c(liste_col, 'loc1')
+m_gev <- evgam(list(TOT_PR ~ s(alt_mean20) +s(loc2)  + s(alt) + s(shape1) , ~ s(scale1)  +s(loc1) +s(scale2) +s(alt_mean20), ~1), data = data_train, family = "gev") 
+liste_aic <- c(liste_aic, AIC(m_gev))
+
+liste_col <- c(liste_col, 'loc2')
+m_gev <- evgam(list(TOT_PR ~ s(alt_mean20)   + s(alt) + s(shape1) +s(loc1) , ~ s(scale1)  +s(loc1) +s(scale2) +s(alt_mean20), ~1), data = data_train, family = "gev")  
+liste_aic <- c(liste_aic, AIC(m_gev))
+
+
+liste_col <- c(liste_col, 'alt')
+m_gev <- evgam(list(TOT_PR ~ s(alt_mean20) +s(loc2)  + s(shape1) +s(loc1) , ~ s(scale1)  +s(loc1) +s(scale2) +s(alt_mean20), ~1), data = data_train, family = "gev") 
+liste_aic <- c(liste_aic, AIC(m_gev))
+
+liste_col <- c(liste_col, 'shape1')
+m_gev <- evgam(list(TOT_PR ~ s(alt_mean20) +s(loc2)  + s(alt)  +s(loc1) , ~ s(scale1)  +s(loc1) +s(scale2) +s(alt_mean20), ~1), data = data_train, family = "gev") 
+liste_aic <- c(liste_aic, AIC(m_gev))
+
+
+
+
+liste_col <- c(liste_col, 'scale1')
+m_gev <- evgam(list(TOT_PR ~ s(alt_mean20) +s(loc2)  + s(alt) + s(shape1) +s(loc1) , ~   s(loc1) +s(scale2) +s(alt_mean20), ~1), data = data_train, family = "gev") 
+liste_aic <- c(liste_aic, AIC(m_gev))
+
+liste_col <- c(liste_col, 'scale2')
+m_gev <- evgam(list(TOT_PR ~ s(alt_mean20) +s(loc2)  + s(alt) + s(shape1) +s(loc1) , ~ s(scale1)  +s(loc1)  +s(alt_mean20), ~1), data = data_train, family = "gev") 
+liste_aic <- c(liste_aic, AIC(m_gev))
+
+liste_col <- c(liste_col, 'loc1')
+m_gev <- evgam(list(TOT_PR ~ s(alt_mean20) +s(loc2)  + s(alt) + s(shape1) +s(loc1) , ~ s(scale1) +s(scale2) +s(alt_mean20), ~1), data = data_train, family = "gev") 
+liste_aic <- c(liste_aic, AIC(m_gev))
+
+liste_col <- c(liste_col, 'alt_mean20')
+m_gev <- evgam(list(TOT_PR ~ s(alt_mean20) +s(loc2)  + s(alt) + s(shape1) +s(loc1) , ~ s(scale1)  +s(loc1) +s(scale2) , ~1), data = data_train, family = "gev") 
+liste_aic <- c(liste_aic, AIC(m_gev))
+
+
+
+
+
+```
+
+
+
+```{r}
+# Graphique sur les features importances 
+library(ggplot2)
+
+liste_cat <- c('loc1 - Location', 'Elevation - Location', 'loc2 - Location', 'scale1 -      Scale', 'scale2 -      Scale', 'Elevation_mean20 - Location', 'shape1 - Location', 'loc1 -      Scale', 'Elevation_mean20 -      Scale')
+liste_values <- c(-2893131, -2897410, -2898053, -2898121, -2898257, -2898423, -2898680, -2898764, -2898835)
+liste_values <- liste_values + 2899015
+
+
+df <- data.frame(Category = liste_cat, Values = liste_values)
+
+ggplot(df, aes(x = Values, y = reorder(Category, Values))) + 
+  geom_bar(stat = "identity") + 
+  theme_minimal() + 
+  labs( x = "Feature Importance") + 
+  theme(axis.text.y = element_text(angle = 0, hjust = 1))
+
+ggplot(df, aes(x = Values, y = reorder(Category, Values))) + 
+  geom_bar(stat = "identity") + 
+  theme_minimal() + 
+  labs(y = '', x = "Feature Importance") + 
+  theme(axis.text.y = element_text(angle = 0, hjust = 1)) +
+  scale_x_log10()
+
+```
+
+
+```{r}
+liste_cat <- c('loc1 - Location', 'Elevation - Location', 'Elevation_mean20 - Location', 'loc1 -      Scale', 'loc2 - Location', 'scale1 -      Scale', 'shape1 - Location', 'Elevation_mean20 -      Scale', 'scale2 -      Scale')
+
+liste_values <- c(-2890702, -2890771, -2891373, -2891894, -2892153, -2892548, -2892567, -2892605, -2892744)
+
+liste_values <- liste_values + 2893256
+df <- data.frame(Category = liste_cat, Values = liste_values)
+
+ggplot(df, aes(x = Values, y = reorder(Category, Values))) + 
+  geom_bar(stat = "identity") + 
+  theme_minimal() + 
+  labs(x = "Feature Importance", y = "Category") + 
+  theme(axis.text.y = element_text(angle = 0, hjust = 1)) +
+  scale_x_log10()
+
+```
+
+
+
+
+
+```{r}
+deviance_model1 <- logLik(m1)
+deviance_model2 <- logLik(m2)
+
+chi_square_stat <- deviance_model1 - deviance_model2
+df_model1 <- df.residual(m1)
+df_model2 <- df.residual(m2)
+df_difference <- df_model1 - df_model2
+
+p_value <- pchisq(chi_square_stat, df_difference, lower.tail = FALSE)
+
+cat("Statistique du Chi-Square:", chi_square_stat, "\n")
+cat("Degrés de liberté:", df_difference, "\n")
+cat("P-valeur:", p_value, "\n")
+
+if (p_value < 0.05) {
+  cat("Les deux modèles sont significativement différents.\n")
+} else {
+  cat("Les deux modèles ne sont pas significativement différents.\n")
+}
+
+```
+
+
+
+
