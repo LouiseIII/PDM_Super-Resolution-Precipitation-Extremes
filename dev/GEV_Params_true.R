@@ -1,5 +1,13 @@
 'Le but de ce fichier va etre de generer les location, shape et scale parameters pour chaque localication'
 
+library(readr)      
+library(evd)         
+library(stats)       
+library(dplyr)      
+library(extRemes)
+library(SpatialExtremes)
+
+
 path <- '~/Documents/ECCE/GitHub'
 path <- paste(path, '/PDM_Super-Resolution-Precipitation-Extremes', sep='')
 
