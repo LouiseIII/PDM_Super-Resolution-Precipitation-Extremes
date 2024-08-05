@@ -1,13 +1,14 @@
 'Le but de ce fichier va etre de generer les location, shape et scale parameters pour chaque localication'
 
-path <- '~/Documents'
-setwd(path)
+path <- '~/Documents/ECCE/GitHub'
+path <- paste(path, '/PDM_Super-Resolution-Precipitation-Extremes', sep='')
 
 # ----------------------------------------------------------------
 # Pour chaque position
 # ----------------------------------------------------------------
 
-data <- read.csv('data2_summer_present_HR.csv')
+path1 <- paste(path, '/data/data2_summer_present_HR.csv', sep='')
+data <- read.csv(path1)
 
 liste_rlat <- numeric(0)
 liste_rlon <- numeric(0)
@@ -53,13 +54,15 @@ for (lat in unique(data$rlat)) {
 }
 
 
-data_set <- data.frame(block = liste_block, 
+data_set <- data.frame(rlat = liste_rlat, 
+                       rlon = liste_rlon,
                        loc = liste_loc,
                        scale = liste_scale,
                        shape = liste_shape)
 
 
-write.csv(data_set, file = "True_Parameters/gev2_param_true_present.csv", row.names = FALSE)
+path2 <- paste(path, '/output/True_Parameters/gev2_param_true_present.csv', sep='')
+write.csv(data_set, file = path2, row.names = FALSE)
 
 
 
@@ -68,7 +71,8 @@ write.csv(data_set, file = "True_Parameters/gev2_param_true_present.csv", row.na
 # Pour chaque block
 # ----------------------------------------------------------------
 
-data <- read.csv('data2_summer_present_LR12.csv')
+path1 <- paste(path, '/data/data2_summer_present_LR12.csv', sep='')
+data <- read.csv(path1)
 
 liste_block <- numeric(0)
 liste_loc <- numeric(0)
@@ -116,6 +120,7 @@ data_set <- data.frame(block = liste_block,
                        scale = liste_scale,
                        shape = liste_shape)
 
+path2 <- paste(path, '/output/True_Parameters/gev2_param_true_present12.csv', sep='')
+write.csv(data_set, file = path2, row.names = FALSE)
 
-write.csv(data_set, file = "True_Parameters/gev2_param_true_future12.csv", row.names = FALSE)
 
